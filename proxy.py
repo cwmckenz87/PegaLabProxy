@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import Response, JSONResponse, StreamingResponse
 import httpx
 import os
 
@@ -29,12 +29,12 @@ async def myip():
 async def proxy(path: str, request: Request):
     url = f"https://{BACKEND_HOSTNAME}/{path}"
 
-    # Copy all headers except 'host'
-    headers = {k: v for k, v in request.headers.items() if k.lower() != "host"}
+    # Copy all headers except hop-by-hop headers
+    excluded_headers = {"host", "connection", "keep-alive", "transfer-encoding", "upgrade"}
+    headers = {k: v for k, v in request.headers.items() if k.lower() not in excluded_headers}
 
     async with httpx.AsyncClient(timeout=30.0, verify=True) as client:
         try:
-            # Stream response from backend
             async with client.stream(
                 method=request.method,
                 url=url,
@@ -43,22 +43,32 @@ async def proxy(path: str, request: Request):
                 content=await request.body()
             ) as resp:
 
-                # Exclude hop-by-hop headers
-                excluded_headers = {"connection", "keep-alive", "transfer-encoding", "upgrade"}
-                response_headers = {k: v for k, v in resp.headers.items() if k.lower() not in excluded_headers}
+                # Filter headers for the response
+                response_headers = {
+                    k: v for k, v in resp.headers.items() if k.lower() not in excluded_headers
+                }
 
-                # Generator to stream chunks to client
-                async def response_generator():
-                    async for chunk in resp.aiter_bytes():
-                        if chunk:
-                            yield chunk
-
-                return StreamingResponse(
-                    response_generator(),
-                    status_code=resp.status_code,
-                    headers=response_headers,
-                    media_type=resp.headers.get("content-type")
-                )
+                # Use streaming if Transfer-Encoding is chunked or response is large
+                if resp.headers.get("transfer-encoding") == "chunked" or int(resp.headers.get("content-length", "0")) > 1024*10:
+                    async def response_generator():
+                        async for chunk in resp.aiter_bytes():
+                            if chunk:
+                                yield chunk
+                    return StreamingResponse(
+                        response_generator(),
+                        status_code=resp.status_code,
+                        headers=response_headers,
+                        media_type=resp.headers.get("content-type")
+                    )
+                else:
+                    # Small or fixed-length response
+                    body = await resp.aread()
+                    return Response(
+                        content=body,
+                        status_code=resp.status_code,
+                        headers=response_headers,
+                        media_type=resp.headers.get("content-type")
+                    )
 
         except httpx.ConnectTimeout:
             return JSONResponse({"error": "ConnectTimeout — cannot reach backend"}, status_code=504)
