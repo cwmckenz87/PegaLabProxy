@@ -37,7 +37,6 @@ async def my_ip():
 async def proxy(path: str, request: Request):
     url = f"https://{BACKEND_HOSTNAME}/{path}"
 
-    # Preserve headers, except Host (let httpx handle Host automatically)
     headers = {k: v for k, v in request.headers.items() if k.lower() != "host"}
 
     async with httpx.AsyncClient(timeout=30.0, verify=True) as client:
@@ -54,4 +53,13 @@ async def proxy(path: str, request: Request):
         except httpx.HTTPError as e:
             return JSONResponse({"error": f"HTTP error: {e}"}, status_code=502)
 
-    return Response(content=resp.content, status_code=resp.status_code, headers=dict(resp.headers))
+    # Remove Content-Length to avoid mismatch
+    response_headers = dict(resp.headers)
+    response_headers.pop("content-length", None)
+
+    return Response(
+        content=resp.content,
+        status_code=resp.status_code,
+        headers=response_headers,
+        media_type=resp.headers.get("content-type")
+    )
