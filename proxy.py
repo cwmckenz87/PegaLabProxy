@@ -6,7 +6,7 @@ import socket
 app = FastAPI()
 
 # Replace with your backend's IPv4 address and original hostname
-BACKEND_IP = "143.244.220.150"
+BACKEND_IP = "44.216.158.92"
 BACKEND_HOSTNAME = "ey57.pegalabs.io"
 
 @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
@@ -19,7 +19,7 @@ async def proxy(path: str, request: Request):
     url = f"https://{BACKEND_IP}/{path}"
 
     # Use HTTPX AsyncClient with IPv4 only
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(verify=False) as client:
         resp = await client.request(
             method=request.method,
             url=url,
