@@ -25,11 +25,36 @@ async def myip():
     return {"public_ip": public_ip}
 
 # === Passthrough proxy ===
+from fastapi import FastAPI, Request
+from fastapi.responses import Response, StreamingResponse, JSONResponse
+import httpx
+import os
+
+app = FastAPI()
+
+BACKEND_HOSTNAME = os.environ.get("BACKEND_HOSTNAME", "ey57.pegalabs.io")
+
+# --- Healthcheck ---
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
+# --- My IP endpoint ---
+@app.get("/myip")
+async def myip():
+    async with httpx.AsyncClient(timeout=10) as client:
+        try:
+            resp = await client.get("https://ifconfig.me/ip")
+            return {"public_ip": resp.text.strip()}
+        except Exception as e:
+            return JSONResponse({"error": str(e)}, status_code=500)
+
+# --- Passthrough proxy ---
 @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
 async def proxy(path: str, request: Request):
     url = f"https://{BACKEND_HOSTNAME}/{path}"
 
-    # Copy all headers except hop-by-hop headers
+    # Copy headers except hop-by-hop headers
     excluded_headers = {"host", "connection", "keep-alive", "transfer-encoding", "upgrade"}
     headers = {k: v for k, v in request.headers.items() if k.lower() not in excluded_headers}
 
@@ -43,25 +68,23 @@ async def proxy(path: str, request: Request):
                 content=await request.body()
             ) as resp:
 
-                # Filter headers for the response
                 response_headers = {
                     k: v for k, v in resp.headers.items() if k.lower() not in excluded_headers
                 }
 
-                # Use streaming if Transfer-Encoding is chunked or response is large
-                if resp.headers.get("transfer-encoding") == "chunked" or int(resp.headers.get("content-length", "0")) > 1024*10:
-                    async def response_generator():
+                # Stream only if Transfer-Encoding: chunked
+                if resp.headers.get("transfer-encoding") == "chunked":
+                    async def generator():
                         async for chunk in resp.aiter_bytes():
                             if chunk:
                                 yield chunk
                     return StreamingResponse(
-                        response_generator(),
+                        generator(),
                         status_code=resp.status_code,
                         headers=response_headers,
                         media_type=resp.headers.get("content-type")
                     )
                 else:
-                    # Small or fixed-length response
                     body = await resp.aread()
                     return Response(
                         content=body,
@@ -74,3 +97,4 @@ async def proxy(path: str, request: Request):
             return JSONResponse({"error": "ConnectTimeout — cannot reach backend"}, status_code=504)
         except httpx.HTTPError as e:
             return JSONResponse({"error": f"HTTP error: {e}"}, status_code=502)
+
