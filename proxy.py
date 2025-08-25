@@ -30,31 +30,30 @@ async def myip():
 async def proxy(path: str, request: Request):
     url = f"https://{BACKEND_HOSTNAME}/{path}"
     
-    # Copy headers except host
     headers = {k: v for k, v in request.headers.items() if k.lower() != "host"}
 
     async with httpx.AsyncClient(timeout=30.0, verify=True) as client:
         try:
-            resp = await client.request(
+            # Use .stream() for streaming responses
+            async with client.stream(
                 method=request.method,
                 url=url,
                 headers=headers,
                 params=request.query_params,
-                content=await request.body(),
-                stream=True  # Stream the response
-            )
+                content=await request.body()
+            ) as resp:
+
+                excluded_headers = {"connection", "keep-alive", "transfer-encoding", "upgrade"}
+                response_headers = {k: v for k, v in resp.headers.items() if k.lower() not in excluded_headers}
+
+                return StreamingResponse(
+                    resp.aiter_bytes(),
+                    status_code=resp.status_code,
+                    headers=response_headers,
+                    media_type=resp.headers.get("content-type")
+                )
+
         except httpx.ConnectTimeout:
             return JSONResponse({"error": "ConnectTimeout — cannot reach backend"}, status_code=504)
         except httpx.HTTPError as e:
             return JSONResponse({"error": f"HTTP error: {e}"}, status_code=502)
-
-        # Forward all headers except hop-by-hop headers
-        excluded_headers = {"connection", "keep-alive", "transfer-encoding", "upgrade"}
-        response_headers = {k: v for k, v in resp.headers.items() if k.lower() not in excluded_headers}
-
-        return StreamingResponse(
-            resp.aiter_bytes(),
-            status_code=resp.status_code,
-            headers=response_headers,
-            media_type=resp.headers.get("content-type")
-        )
