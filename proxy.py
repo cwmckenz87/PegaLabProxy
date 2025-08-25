@@ -5,7 +5,7 @@ import os
 
 app = FastAPI()
 
-# Backend hostname you want to proxy to
+# Backend hostname to proxy to
 BACKEND_HOSTNAME = os.environ.get("BACKEND_HOSTNAME", "ey57.pegalabs.io")
 
 # === Healthcheck ===
@@ -13,10 +13,9 @@ BACKEND_HOSTNAME = os.environ.get("BACKEND_HOSTNAME", "ey57.pegalabs.io")
 async def health():
     return {"status": "ok"}
 
-# === My public IP endpoint ===
+# === Public IP endpoint ===
 @app.get("/myip")
 async def myip():
-    # use a public service to detect outbound IP
     async with httpx.AsyncClient(timeout=10) as client:
         try:
             resp = await client.get("https://ifconfig.me/ip")
@@ -25,16 +24,17 @@ async def myip():
             return JSONResponse({"error": f"Cannot determine IP: {e}"}, status_code=500)
     return {"public_ip": public_ip}
 
-# === Proxy passthrough ===
+# === Passthrough proxy ===
 @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
 async def proxy(path: str, request: Request):
     url = f"https://{BACKEND_HOSTNAME}/{path}"
-    
+
+    # Copy all headers except 'host'
     headers = {k: v for k, v in request.headers.items() if k.lower() != "host"}
 
     async with httpx.AsyncClient(timeout=30.0, verify=True) as client:
         try:
-            # Use .stream() for streaming responses
+            # Stream response from backend
             async with client.stream(
                 method=request.method,
                 url=url,
@@ -43,11 +43,18 @@ async def proxy(path: str, request: Request):
                 content=await request.body()
             ) as resp:
 
+                # Exclude hop-by-hop headers
                 excluded_headers = {"connection", "keep-alive", "transfer-encoding", "upgrade"}
                 response_headers = {k: v for k, v in resp.headers.items() if k.lower() not in excluded_headers}
 
+                # Generator to stream chunks to client
+                async def response_generator():
+                    async for chunk in resp.aiter_bytes():
+                        if chunk:
+                            yield chunk
+
                 return StreamingResponse(
-                    resp.aiter_bytes(),
+                    response_generator(),
                     status_code=resp.status_code,
                     headers=response_headers,
                     media_type=resp.headers.get("content-type")
