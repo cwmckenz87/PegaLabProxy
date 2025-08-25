@@ -1,33 +1,27 @@
-from fastapi import FastAPI, Request
-from fastapi.responses import Response
-import httpx
+from fastapi import FastAPI
 import socket
 
 app = FastAPI()
-
-# Replace with your backend's IPv4 address and original hostname
-BACKEND_IP = "44.216.158.92"
 BACKEND_HOSTNAME = "ey57.pegalabs.io"
 
-@app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
-async def proxy(path: str, request: Request):
-    # Copy headers and set Host to original hostname
-    headers = {k: v for k, v in request.headers.items() if k.lower() != "host"}
-    headers["Host"] = BACKEND_HOSTNAME
+@app.get("/healthcheck")
+async def healthcheck():
+    """
+    Resolve all IPv4 addresses for the backend hostname and return them.
+    """
+    try:
+        # Resolve IPv4 addresses only
+        addrs = socket.getaddrinfo(BACKEND_HOSTNAME, 443, socket.AF_INET, socket.SOCK_STREAM)
+        ipv4_list = [a[4][0] for a in addrs]
+        return {
+            "hostname": BACKEND_HOSTNAME,
+            "ipv4_addresses": ipv4_list,
+            "count": len(ipv4_list)
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
-    # Build the full URL using IP
-    url = f"https://{BACKEND_IP}/{path}"
-
-    # Use HTTPX AsyncClient with IPv4 only
-    async with httpx.AsyncClient(verify=False) as client:
-        resp = await client.request(
-            method=request.method,
-            url=url,
-            headers=headers,
-            params=request.query_params,
-            content=await request.body(),
-            timeout=30.0
-        )
-
-    # Forward response
-    return Response(content=resp.content, status_code=resp.status_code, headers=dict(resp.headers))
+# Optional root route
+@app.get("/")
+async def root():
+    return {"message": "Proxy healthcheck service running. Use /healthcheck to test connectivity."}
