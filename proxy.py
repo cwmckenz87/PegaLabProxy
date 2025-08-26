@@ -7,7 +7,12 @@ TARGET_HOST = "https://ey57.pegalabs.io"  # base URL of target system
 
 @app.get("/myip")
 async def my_ip(request: Request):
-    return {"public_ip": request.client.host}
+    async with httpx.AsyncClient(timeout=10) as client:
+        try:
+            resp = await client.get("https://ifconfig.me/ip")
+            return {"public_ip": resp.text.strip()}
+        except Exception as e:
+            return JSONResponse({"error": str(e)}, status_code=500)
 
 @app.get("/health")
 async def health():
