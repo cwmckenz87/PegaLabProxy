@@ -43,25 +43,29 @@ async def proxy(full_path: str, request: Request):
             timeout=30.0
         )
 
-    # Start with the upstream content
+    # Default: use raw content
     content = resp.content
 
-    # Decompress if encoded
     encoding = resp.headers.get("content-encoding", "").lower()
-    if encoding == "gzip":
-        content = gzip.decompress(content)
-    elif encoding == "deflate":
-        content = zlib.decompress(content)
+    if encoding in ("gzip", "deflate"):
+        try:
+            if encoding == "gzip":
+                content = gzip.decompress(content)
+            elif encoding == "deflate":
+                content = zlib.decompress(content)
+        except Exception:
+            # If decompression fails, fallback to raw
+            content = resp.content
+            encoding = ""
 
-    # Copy headers but fix for decompression
+    # Copy headers
     response_headers = dict(resp.headers)
 
-    # Remove headers that no longer apply
-    response_headers.pop("content-encoding", None)
-    response_headers.pop("transfer-encoding", None)
-
-    # Recalculate Content-Length
-    response_headers["content-length"] = str(len(content))
+    # Remove/adjust headers if we decompressed
+    if encoding:
+        response_headers.pop("content-encoding", None)
+        response_headers.pop("transfer-encoding", None)
+        response_headers["content-length"] = str(len(content))
 
     return Response(
         content=content,
