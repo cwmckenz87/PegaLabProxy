@@ -42,6 +42,7 @@ async def proxy(full_path: str, request: Request):
 
     # Return the response fully buffered, with all headers
     response_headers = dict(resp.headers)
+    response_headers["Connection"] = "keep-alive"
     return Response(
         content=resp.content,
         status_code=resp.status_code,
