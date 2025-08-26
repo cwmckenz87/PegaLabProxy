@@ -5,6 +5,12 @@ app = FastAPI()
 
 TARGET_URL = "https://ey57.pegalabs.io/oauth/token"  # OAuth token endpoint
 
+@app.get("/myip")
+async def my_ip(request: Request):
+    # Get client IP from headers or connection
+    client_host = request.client.host
+    return {"public_ip": client_host}
+
 @app.post("/proxy/token")
 async def proxy_token(request: Request):
     # Read the incoming body
