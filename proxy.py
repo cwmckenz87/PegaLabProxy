@@ -46,7 +46,7 @@ async def proxy(full_path: str, request: Request):
     # Default: use raw content
     content = resp.content
 
-        encoding = resp.headers.get("content-encoding", "").lower()
+    encoding = resp.headers.get("content-encoding", "").lower()
     decompressed = False
 
     if encoding in ("gzip", "deflate"):
