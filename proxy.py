@@ -45,6 +45,5 @@ async def proxy(full_path: str, request: Request):
     return Response(
         content=resp.content,
         status_code=resp.status_code,
-        headers=response_headers,
-        media_type=resp.headers.get("content-type")
+        headers=response_headers
     )
