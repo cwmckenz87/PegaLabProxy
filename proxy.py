@@ -59,7 +59,6 @@ async def proxy(full_path: str, request: Request):
         except Exception:
             # Failed decompression → fallback to raw content
             content = resp.content
-            encoding = ""  # mark as plain
 
     # Copy headers
     response_headers = dict(resp.headers)
