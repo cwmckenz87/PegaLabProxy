@@ -1,70 +1,34 @@
-from fastapi import FastAPI, Request
-from fastapi.responses import Response, JSONResponse
+from fastapi import FastAPI, Request, Response
 import httpx
-import os
 
 app = FastAPI()
 
-BACKEND_HOSTNAME = os.environ.get("BACKEND_HOSTNAME", "ey57.pegalabs.io")
+TARGET_URL = "https://ey57.pegalabs.io/oauth/token"  # OAuth token endpoint
 
-# --- Healthcheck ---
-@app.get("/health")
-async def health():
-    return {"status": "ok"}
+@app.post("/proxy/token")
+async def proxy_token(request: Request):
+    # Read the incoming body
+    body_bytes = await request.body()
 
-# --- My IP endpoint ---
-@app.get("/myip")
-async def myip():
-    async with httpx.AsyncClient(timeout=10) as client:
-        try:
-            resp = await client.get("https://ifconfig.me/ip")
-            return {"public_ip": resp.text.strip()}
-        except Exception as e:
-            return JSONResponse({"error": str(e)}, status_code=500)
+    # Copy headers, removing host to avoid conflicts
+    headers = dict(request.headers)
+    headers.pop("host", None)
 
-# --- Passthrough proxy ---
-@app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
-async def proxy(path: str, request: Request):
-    url = f"https://{BACKEND_HOSTNAME}/{path}"
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            TARGET_URL,
+            content=body_bytes,
+            headers=headers,
+            timeout=30.0
+        )
 
-    # Copy headers except hop-by-hop headers
-    excluded_headers = {
-        "host",
-        "connection",
-        "keep-alive",
-        "proxy-authenticate",
-        "proxy-authorization",
-        "te",
-        "trailers",
-        "transfer-encoding",
-        "upgrade",
-    }
-    headers = {k: v for k, v in request.headers.items() if k.lower() not in excluded_headers}
+    # Forward response headers exactly
+    response_headers = dict(resp.headers)
 
-    async with httpx.AsyncClient(timeout=30.0, verify=True) as client:
-        try:
-            resp = await client.request(
-                method=request.method,
-                url=url,
-                headers=headers,
-                params=request.query_params,
-                content=await request.body()
-            )
-
-            # Pass through all headers except hop-by-hop
-            response_headers = {
-                k: v for k, v in resp.headers.items() if k.lower() not in excluded_headers
-            }
-
-            # Fully buffered response
-            return Response(
-                content=resp.content,
-                status_code=resp.status_code,
-                headers=response_headers,
-                media_type=resp.headers.get("content-type"),
-            )
-
-        except httpx.ConnectTimeout:
-            return JSONResponse({"error": "ConnectTimeout — cannot reach backend"}, status_code=504)
-        except httpx.HTTPError as e:
-            return JSONResponse({"error": f"HTTP error: {e}"}, status_code=502)
+    # Return the response fully buffered
+    return Response(
+        content=resp.content,
+        status_code=resp.status_code,
+        headers=response_headers,
+        media_type=resp.headers.get("content-type")
+    )
